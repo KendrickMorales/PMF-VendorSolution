@@ -2,6 +2,9 @@ import os
 import tempfile
 import shutil
 import zipfile
+import csv
+import io
+import re
 from datetime import datetime
 from pathlib import Path
 from flask import request, jsonify, send_from_directory, Response
@@ -29,6 +32,7 @@ def register_routes(app):
         """Scan folder for SOLIDWORKS files and check for existing mappings"""
         data = request.json
         folder_path = data.get('folderPath')
+        include_subdirectories = data.get('includeSubdirectories', False)  # Default to False
         
         if not folder_path or not os.path.exists(folder_path):
             return jsonify({'error': 'Invalid folder path'}), 400
@@ -44,10 +48,19 @@ def register_routes(app):
         
         has_renamed_files = False
         for ext in solidworks_extensions:
-            # Only scan files in the selected folder, not subdirectories
-            for file_path in Path(folder_path).glob(f'*{ext}'):
+            # Use recursive pattern if subdirectories should be included
+            if include_subdirectories:
+                pattern = f'**/*{ext}'
+            else:
+                pattern = f'*{ext}'
+            
+            for file_path in Path(folder_path).glob(pattern):
                 file_str = str(file_path)
-                relative_path = file_path.name  # Just the filename, no subdirectory path
+                # For subdirectories, preserve relative path; otherwise just filename
+                if include_subdirectories:
+                    relative_path = os.path.relpath(file_str, folder_path)
+                else:
+                    relative_path = file_path.name  # Just the filename, no subdirectory path
                 file_name = file_path.name
                 
                 # Check if filename is a part number (12 digits)
@@ -690,6 +703,302 @@ def register_routes(app):
                 })
         
         return jsonify({'files': processed_files, 'total': len(processed_files)})
+
+    @app.route('/api/match-csv', methods=['POST'])
+    def match_csv():
+        """Match CSV entries against processed files"""
+        if 'csvFile' not in request.files:
+            return jsonify({'error': 'No CSV file uploaded'}), 400
+        
+        csv_file = request.files['csvFile']
+        if csv_file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        try:
+            # Read CSV file
+            stream = io.StringIO(csv_file.stream.read().decode("UTF8"), newline=None)
+            csv_reader = csv.DictReader(stream)
+            
+            # Get all processed files
+            mappings = load_mappings()
+            processed_files = []
+            for file_path, mapping_data in mappings.items():
+                if isinstance(mapping_data, dict):
+                    base = mapping_data.get('base', '')
+                    rev = mapping_data.get('revision', 1)
+                    full_part_number = f"{base}{rev:03d}"
+                    processed_files.append({
+                        'originalPath': file_path,
+                        'originalName': os.path.basename(file_path),
+                        'basePartNumber': base,
+                        'revision': rev,
+                        'fullPartNumber': full_part_number
+                    })
+                elif isinstance(mapping_data, str) and len(mapping_data) == 12:
+                    processed_files.append({
+                        'originalPath': file_path,
+                        'originalName': os.path.basename(file_path),
+                        'basePartNumber': mapping_data[:9],
+                        'revision': int(mapping_data[9:]),
+                        'fullPartNumber': mapping_data
+                    })
+            
+            # Create lookup dictionaries
+            by_full_part = {f['fullPartNumber']: f for f in processed_files}
+            by_base_part = {f['basePartNumber']: f for f in processed_files}
+            by_filename = {f['originalName'].lower(): f for f in processed_files}
+            
+            # Also create lookup by filename without extension
+            by_filename_no_ext = {}
+            for f in processed_files:
+                name_no_ext = os.path.splitext(f['originalName'])[0].lower()
+                if name_no_ext not in by_filename_no_ext:
+                    by_filename_no_ext[name_no_ext] = f
+            
+            # Match CSV entries
+            matches = []
+            unmatched = []
+            csv_rows = list(csv_reader)
+            
+            for row in csv_rows:
+                # Try to match by various fields
+                matched = None
+                match_type = None
+                
+                # Try full part number (12 digits) - exact match
+                for key, value in row.items():
+                    if value:
+                        value_str = str(value).strip()
+                        # Check if entire value is a 12-digit number
+                        if len(value_str) == 12 and value_str.isdigit():
+                            if value_str in by_full_part:
+                                matched = by_full_part[value_str]
+                                match_type = 'fullPartNumber'
+                                break
+                        # Check if value contains a 12-digit number
+                        part_num_match = re.search(r'\d{12}', value_str)
+                        if part_num_match:
+                            part_num = part_num_match.group()
+                            if part_num in by_full_part:
+                                matched = by_full_part[part_num]
+                                match_type = 'fullPartNumber'
+                                break
+                
+                # Try base part number (9 digits) - exact or embedded
+                if not matched:
+                    for key, value in row.items():
+                        if value:
+                            value_str = str(value).strip()
+                            # Check if entire value is a 9-digit number
+                            if len(value_str) == 9 and value_str.isdigit():
+                                if value_str in by_base_part:
+                                    matched = by_base_part[value_str]
+                                    match_type = 'basePartNumber'
+                                    break
+                            # Check if value contains a 9-digit number
+                            part_num_match = re.search(r'\d{9}', value_str)
+                            if part_num_match:
+                                part_num = part_num_match.group()
+                                if part_num in by_base_part:
+                                    matched = by_base_part[part_num]
+                                    match_type = 'basePartNumber'
+                                    break
+                
+                # Try exact filename match (with extension)
+                if not matched:
+                    for key, value in row.items():
+                        if value:
+                            filename = str(value).strip().lower()
+                            if filename in by_filename:
+                                matched = by_filename[filename]
+                                match_type = 'filename'
+                                break
+                
+                # Try filename without extension match
+                if not matched:
+                    for key, value in row.items():
+                        if value:
+                            value_str = str(value).strip().lower()
+                            # Remove extension if present
+                            value_no_ext = os.path.splitext(value_str)[0]
+                            if value_no_ext in by_filename_no_ext:
+                                matched = by_filename_no_ext[value_no_ext]
+                                match_type = 'filename'
+                                break
+                
+                # Try extracting filename from CSV (filename is usually at the start before first space)
+                # This handles cases like "SHRD-FSCM-PLT-MS-101-LH DESCRIPTION TEXT"
+                if not matched:
+                    for key, value in row.items():
+                        if value:
+                            value_str = str(value).strip()
+                            # Extract potential filename - take first "word" (before first space)
+                            # or match pattern like "SHRD-FSCM-PLT-MS-101-LH"
+                            parts = value_str.split()
+                            if parts:
+                                potential_filename = parts[0].lower()
+                                potential_filename_no_ext = os.path.splitext(potential_filename)[0]
+                                
+                                # Try exact match with extension
+                                if potential_filename in by_filename:
+                                    matched = by_filename[potential_filename]
+                                    match_type = 'filename'
+                                    break
+                                
+                                # Try match without extension
+                                if potential_filename_no_ext in by_filename_no_ext:
+                                    matched = by_filename_no_ext[potential_filename_no_ext]
+                                    match_type = 'filename'
+                                    break
+                                
+                                # Try matching against all processed filenames (check if processed filename starts with CSV filename)
+                                for proc_file in processed_files:
+                                    proc_filename = proc_file['originalName'].lower()
+                                    proc_filename_no_ext = os.path.splitext(proc_filename)[0].lower()
+                                    
+                                    # Check if processed filename matches the extracted CSV filename
+                                    if (potential_filename == proc_filename or 
+                                        potential_filename_no_ext == proc_filename_no_ext or
+                                        potential_filename == proc_filename_no_ext or
+                                        potential_filename_no_ext == proc_filename):
+                                        matched = proc_file
+                                        match_type = 'filename'
+                                        break
+                                    
+                                    # Check if processed filename starts with CSV filename part
+                                    if (proc_filename.startswith(potential_filename) or
+                                        proc_filename_no_ext.startswith(potential_filename_no_ext)):
+                                        matched = proc_file
+                                        match_type = 'filename'
+                                        break
+                                    
+                                    # Check if CSV filename part is in processed filename
+                                    if (potential_filename in proc_filename or
+                                        potential_filename_no_ext in proc_filename_no_ext):
+                                        matched = proc_file
+                                        match_type = 'filename'
+                                        break
+                                
+                                if matched:
+                                    break
+                
+                # Try reverse: check if CSV value starts with any processed filename
+                if not matched:
+                    for key, value in row.items():
+                        if value:
+                            value_str = str(value).strip().lower()
+                            value_no_ext = os.path.splitext(value_str)[0]
+                            
+                            for proc_file in processed_files:
+                                proc_filename = proc_file['originalName'].lower()
+                                proc_filename_no_ext = os.path.splitext(proc_filename)[0].lower()
+                                
+                                # Check if CSV value starts with processed filename
+                                if (value_str.startswith(proc_filename) or 
+                                    value_str.startswith(proc_filename_no_ext) or
+                                    value_no_ext.startswith(proc_filename) or
+                                    value_no_ext.startswith(proc_filename_no_ext)):
+                                    matched = proc_file
+                                    match_type = 'filename'
+                                    break
+                            
+                            if matched:
+                                break
+                
+                if matched:
+                    matches.append({
+                        'csvRow': row,
+                        'matchedFile': matched,
+                        'matchType': match_type
+                    })
+                else:
+                    unmatched.append(row)
+            
+            return jsonify({
+                'matches': matches,
+                'unmatched': unmatched,
+                'totalCsvRows': len(csv_rows),
+                'matchedCount': len(matches),
+                'unmatchedCount': len(unmatched)
+            })
+        
+        except Exception as e:
+            return jsonify({'error': f'Error processing CSV: {str(e)}'}), 500
+
+    @app.route('/api/generate-excel-from-matches', methods=['POST'])
+    def generate_excel_from_matches():
+        """Generate Excel file from matched CSV entries"""
+        data = request.json
+        matches = data.get('matches', [])
+        
+        if not matches:
+            return jsonify({'error': 'No matches provided'}), 400
+        
+        try:
+            # Create workbook
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Matched Part Numbers"
+            
+            # Headers
+            ws['A1'] = 'ITEM NO.'
+            ws['B1'] = 'PART NUMBER'
+            ws['C1'] = 'QTY'
+            ws['D1'] = 'ORIGINAL FILENAME'
+            ws['E1'] = 'ORIGINAL PATH'
+            
+            # Style headers
+            header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+            header_font_color = Font(bold=True, color="FFFFFF")
+            
+            for col in ['A1', 'B1', 'C1', 'D1', 'E1']:
+                ws[col].font = header_font_color
+                ws[col].fill = header_fill
+            
+            # Add data
+            row = 2
+            item_no = 1
+            seen_part_numbers = set()
+            
+            for match in matches:
+                matched_file = match['matchedFile']
+                part_number = matched_file['fullPartNumber']
+                
+                # Only add unique part numbers
+                if part_number not in seen_part_numbers:
+                    ws[f'A{row}'] = item_no
+                    ws[f'B{row}'] = part_number
+                    ws[f'C{row}'] = ''  # QTY left blank for manual entry
+                    ws[f'D{row}'] = matched_file['originalName']
+                    ws[f'E{row}'] = matched_file['originalPath']
+                    
+                    seen_part_numbers.add(part_number)
+                    row += 1
+                    item_no += 1
+            
+            # Auto-adjust column widths
+            ws.column_dimensions['A'].width = 12
+            ws.column_dimensions['B'].width = 15
+            ws.column_dimensions['C'].width = 10
+            ws.column_dimensions['D'].width = 30
+            ws.column_dimensions['E'].width = 50
+            
+            # Save to bytes
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            
+            response = Response(
+                output.read(),
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={
+                    'Content-Disposition': 'attachment; filename=Matched_Part_Numbers.xlsx'
+                }
+            )
+            return response
+        
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
 
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')

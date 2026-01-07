@@ -11,13 +11,16 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
+  const [includeSubdirectories, setIncludeSubdirectories] = useState(false)
   const fileInputRef = React.useRef(null)
-  
+
   // Processed files page state
   const [processedFiles, setProcessedFiles] = useState([])
   const [searchQuery, setSearchQuery] = useState('')
   const [sortField, setSortField] = useState('originalName')
   const [sortDirection, setSortDirection] = useState('asc')
+  const [csvMatches, setCsvMatches] = useState(null)
+  const csvFileInputRef = React.useRef(null)
 
   const handleFolderPicker = async () => {
     setLoading(true)
@@ -29,20 +32,20 @@ function App() {
       if ('showDirectoryPicker' in window) {
         const directoryHandle = await window.showDirectoryPicker()
         setSelectedFolder(directoryHandle)
-        
+
         // Extract files from the directory
         const solidworksFiles = []
         await scanDirectory(directoryHandle, solidworksFiles, '')
-        
+
         if (solidworksFiles.length === 0) {
           setError('No SOLIDWORKS files found in the selected folder')
           setLoading(false)
           return
         }
-        
+
         setFiles(solidworksFiles)
         setFolderPath(directoryHandle.name)
-        
+
         // Automatically process the files
         await processFilesFromSelection(solidworksFiles)
       } else {
@@ -56,7 +59,7 @@ function App() {
       setLoading(false)
     }
   }
-  
+
   const processFilesFromSelection = async (filesToProcess) => {
     if (!filesToProcess || filesToProcess.length === 0) {
       setLoading(false)
@@ -69,7 +72,7 @@ function App() {
       if (filesToProcess[0].file || filesToProcess[0].handle) {
         // Create FormData to upload files
         const formData = new FormData()
-        
+
         for (const fileInfo of filesToProcess) {
           if (fileInfo.file) {
             // From file input
@@ -81,10 +84,13 @@ function App() {
           }
         }
 
-        const response = await fetch('http://localhost:5000/api/process-uploaded-files', {
-          method: 'POST',
-          body: formData,
-        })
+        const response = await fetch(
+          'http://localhost:5000/api/process-uploaded-files',
+          {
+            method: 'POST',
+            body: formData,
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to process uploaded files')
@@ -92,15 +98,15 @@ function App() {
 
         const data = await response.json()
         setFileData(data.results)
-        
+
         // Calculate folder status from results
-        const processed = data.results.filter(f => f.hasMapping).length
-        const newFiles = data.results.filter(f => f.isNew).length
+        const processed = data.results.filter((f) => f.hasMapping).length
+        const newFiles = data.results.filter((f) => f.isNew).length
         setFolderStatus({
           totalFiles: data.results.length,
           processedFiles: processed,
           newFiles: newFiles,
-          hasBeenProcessed: processed > 0
+          hasBeenProcessed: processed > 0,
         })
       }
     } catch (err) {
@@ -111,18 +117,28 @@ function App() {
   }
 
   const scanDirectory = async (dirHandle, fileList, path) => {
-    const solidworksExtensions = ['.sldprt', '.sldasm', '.slddrw', '.step', '.stp', '.x_t', '.x_b']
-    
+    const solidworksExtensions = [
+      '.sldprt',
+      '.sldasm',
+      '.slddrw',
+      '.step',
+      '.stp',
+      '.x_t',
+      '.x_b',
+    ]
+
     for await (const entry of dirHandle.values()) {
       // Only scan files in the selected folder, skip subdirectories
       if (entry.kind === 'file') {
-        const ext = entry.name.toLowerCase().substring(entry.name.lastIndexOf('.'))
+        const ext = entry.name
+          .toLowerCase()
+          .substring(entry.name.lastIndexOf('.'))
         if (solidworksExtensions.includes(ext)) {
           fileList.push({
             name: entry.name,
-            path: entry.name,  // Just filename, no subdirectory path
+            path: entry.name, // Just filename, no subdirectory path
             relativePath: entry.name,
-            handle: entry
+            handle: entry,
           })
         }
       }
@@ -142,28 +158,39 @@ function App() {
     setSuccess(null)
 
     try {
-      const solidworksExtensions = ['.sldprt', '.sldasm', '.slddrw', '.step', '.stp', '.x_t', '.x_b']
+      const solidworksExtensions = [
+        '.sldprt',
+        '.sldasm',
+        '.slddrw',
+        '.step',
+        '.stp',
+        '.x_t',
+        '.x_b',
+      ]
       const solidworksFiles = []
-      
+
       // Get folder name from first file's relative path
       const firstFile = fileList[0]
-      const folderPath = firstFile.webkitRelativePath ? 
-        firstFile.webkitRelativePath.split('/')[0] : 
-        'Selected Folder'
+      const folderPath = firstFile.webkitRelativePath
+        ? firstFile.webkitRelativePath.split('/')[0]
+        : 'Selected Folder'
 
-      Array.from(fileList).forEach(file => {
-        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf('.'))
+      Array.from(fileList).forEach((file) => {
+        const ext = file.name
+          .toLowerCase()
+          .substring(file.name.lastIndexOf('.'))
         if (solidworksExtensions.includes(ext)) {
           // Only include files directly in the selected folder (no subdirectories)
           const relativePath = file.webkitRelativePath || file.name
           // Check if file is in a subdirectory (has '/' in path beyond the folder name)
           const pathParts = relativePath.split('/')
-          if (pathParts.length <= 2) {  // folder/file.ext or just file.ext
+          if (pathParts.length <= 2) {
+            // folder/file.ext or just file.ext
             solidworksFiles.push({
               name: file.name,
-              path: file.name,  // Just filename for top-level files
+              path: file.name, // Just filename for top-level files
               relativePath: file.name,
-              file: file
+              file: file,
             })
           }
         }
@@ -175,7 +202,7 @@ function App() {
       } else {
         setFiles(solidworksFiles)
         setFolderPath(folderPath)
-        
+
         // Automatically process the files
         await processFilesFromSelection(solidworksFiles)
       }
@@ -183,7 +210,7 @@ function App() {
       setError(err.message || 'Failed to process files')
       setLoading(false)
     }
-    
+
     // Reset input so same folder can be selected again
     event.target.value = ''
   }
@@ -205,7 +232,10 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ folderPath }),
+        body: JSON.stringify({
+          folderPath,
+          includeSubdirectories,
+        }),
       })
 
       if (!response.ok) {
@@ -215,32 +245,37 @@ function App() {
       const data = await response.json()
       setFiles(data.files)
       setFolderStatus(data.folderStatus || null)
-      
+
       // Automatically process files after scanning
       if (data.files && data.files.length > 0) {
-        const filePaths = data.files.map(f => f.path)
-        const processResponse = await fetch('http://localhost:5000/api/read-properties', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ filePaths }),
-        })
+        const filePaths = data.files.map((f) => f.path)
+        const processResponse = await fetch(
+          'http://localhost:5000/api/read-properties',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ filePaths }),
+          }
+        )
 
         if (processResponse.ok) {
           const processData = await processResponse.json()
           setFileData(processData.results)
-          
+
           // Update folder status from processed results
-          const processed = processData.results.filter(f => f.hasMapping).length
-          const newFiles = processData.results.filter(f => f.isNew).length
-          const hasRenamed = processData.results.some(f => f.isRenamedFile)
+          const processed = processData.results.filter(
+            (f) => f.hasMapping
+          ).length
+          const newFiles = processData.results.filter((f) => f.isNew).length
+          const hasRenamed = processData.results.some((f) => f.isRenamedFile)
           setFolderStatus({
             totalFiles: processData.results.length,
             processedFiles: processed,
             newFiles: newFiles,
             hasBeenProcessed: processed > 0,
-            hasRenamedFiles: hasRenamed
+            hasRenamedFiles: hasRenamed,
           })
         }
       }
@@ -267,7 +302,7 @@ function App() {
       if (files[0].file || files[0].handle) {
         // Create FormData to upload files
         const formData = new FormData()
-        
+
         for (const fileInfo of files) {
           if (fileInfo.file) {
             // From file input
@@ -279,10 +314,13 @@ function App() {
           }
         }
 
-        const response = await fetch('http://localhost:5000/api/process-uploaded-files', {
-          method: 'POST',
-          body: formData,
-        })
+        const response = await fetch(
+          'http://localhost:5000/api/process-uploaded-files',
+          {
+            method: 'POST',
+            body: formData,
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to process uploaded files')
@@ -290,26 +328,29 @@ function App() {
 
         const data = await response.json()
         setFileData(data.results)
-        
+
         // Calculate folder status from results
-        const processed = data.results.filter(f => f.hasMapping).length
-        const newFiles = data.results.filter(f => f.isNew).length
+        const processed = data.results.filter((f) => f.hasMapping).length
+        const newFiles = data.results.filter((f) => f.isNew).length
         setFolderStatus({
           totalFiles: data.results.length,
           processedFiles: processed,
           newFiles: newFiles,
-          hasBeenProcessed: processed > 0
+          hasBeenProcessed: processed > 0,
         })
       } else {
         // Files from server-side folder scan
-        const filePaths = files.map(f => f.path)
-        const response = await fetch('http://localhost:5000/api/read-properties', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ filePaths }),
-        })
+        const filePaths = files.map((f) => f.path)
+        const response = await fetch(
+          'http://localhost:5000/api/read-properties',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ filePaths }),
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to read file properties')
@@ -317,17 +358,17 @@ function App() {
 
         const data = await response.json()
         setFileData(data.results)
-        
+
         // Calculate folder status from results
-        const processed = data.results.filter(f => f.hasMapping).length
-        const newFiles = data.results.filter(f => f.isNew).length
-        const hasRenamed = data.results.some(f => f.isRenamedFile)
+        const processed = data.results.filter((f) => f.hasMapping).length
+        const newFiles = data.results.filter((f) => f.isNew).length
+        const hasRenamed = data.results.some((f) => f.isRenamedFile)
         setFolderStatus({
           totalFiles: data.results.length,
           processedFiles: processed,
           newFiles: newFiles,
           hasBeenProcessed: processed > 0,
-          hasRenamedFiles: hasRenamed
+          hasRenamedFiles: hasRenamed,
         })
       }
     } catch (err) {
@@ -348,54 +389,63 @@ function App() {
 
     try {
       // Check if files were uploaded (have file or handle property)
-      const hasUploadedFiles = files.length > 0 && (files[0].file || files[0].handle)
-      
+      const hasUploadedFiles =
+        files.length > 0 && (files[0].file || files[0].handle)
+
       if (hasUploadedFiles) {
         // For uploaded files, we can only save mappings
         // File updates would require File System Access API write access
-        const updates = fileData.map(file => ({
+        const updates = fileData.map((file) => ({
           filePath: file.path,
           vendorPartNumber: file.vendorPartNumber,
-          revision: file.revision
+          revision: file.revision,
         }))
 
-        const response = await fetch('http://localhost:5000/api/update-properties', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ updates }),
-        })
+        const response = await fetch(
+          'http://localhost:5000/api/update-properties',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ updates }),
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to save mappings')
         }
 
         const data = await response.json()
-        setSuccess(`Mappings saved for ${data.results.length} file(s). Use the exported CSV to update files manually or use SOLIDWORKS API on Windows.`)
+        setSuccess(
+          `Mappings saved for ${data.results.length} file(s). Use the exported CSV to update files manually or use SOLIDWORKS API on Windows.`
+        )
       } else {
         // For server-side scanned files, we can update directly
-        const updates = fileData.map(file => ({
+        const updates = fileData.map((file) => ({
           filePath: file.path,
           vendorPartNumber: file.vendorPartNumber,
-          revision: file.revision
+          revision: file.revision,
         }))
 
-        const response = await fetch('http://localhost:5000/api/update-properties', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ updates }),
-        })
+        const response = await fetch(
+          'http://localhost:5000/api/update-properties',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ updates }),
+          }
+        )
 
         if (!response.ok) {
           throw new Error('Failed to update properties')
         }
 
         const data = await response.json()
-        const allSuccess = data.results.every(r => r.success)
-        
+        const allSuccess = data.results.every((r) => r.success)
+
         if (allSuccess) {
           setSuccess(`Successfully updated ${data.results.length} file(s)`)
         } else {
@@ -413,7 +463,7 @@ function App() {
     try {
       const response = await fetch('http://localhost:5000/api/export-mappings')
       const data = await response.json()
-      
+
       const blob = new Blob([data.csv], { type: 'text/csv' })
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -439,38 +489,43 @@ function App() {
 
     try {
       // Check if files were uploaded (have file or handle property)
-      const hasUploadedFiles = files.length > 0 && (files[0].file || files[0].handle)
-      
+      const hasUploadedFiles =
+        files.length > 0 && (files[0].file || files[0].handle)
+
       if (hasUploadedFiles) {
         // For uploaded files, we need to upload them again with new names
         const formData = new FormData()
-        
+
         for (const fileInfo of files) {
-          const fileDataItem = fileData.find(f => 
-            f.path === fileInfo.path || 
-            f.name === fileInfo.name ||
-            f.path === fileInfo.relativePath
+          const fileDataItem = fileData.find(
+            (f) =>
+              f.path === fileInfo.path ||
+              f.name === fileInfo.name ||
+              f.path === fileInfo.relativePath
           )
           if (!fileDataItem || !fileDataItem.vendorPartNumber) continue
-          
+
           let file = null
           if (fileInfo.file) {
             file = fileInfo.file
           } else if (fileInfo.handle) {
             file = await fileInfo.handle.getFile()
           }
-          
+
           if (file) {
             const ext = file.name.substring(file.name.lastIndexOf('.'))
             const newName = `${fileDataItem.vendorPartNumber}${ext}`
             formData.append('files', file, newName)
           }
         }
-        
-        const response = await fetch('http://localhost:5000/api/generate-files-from-upload', {
-          method: 'POST',
-          body: formData,
-        })
+
+        const response = await fetch(
+          'http://localhost:5000/api/generate-files-from-upload',
+          {
+            method: 'POST',
+            body: formData,
+          }
+        )
 
         if (!response.ok) {
           const errorText = await response.text()
@@ -492,8 +547,10 @@ function App() {
         a.click()
         window.URL.revokeObjectURL(url)
         document.body.removeChild(a)
-        
-        setSuccess('Successfully generated files with part numbers. Zip file downloaded!')
+
+        setSuccess(
+          'Successfully generated files with part numbers. Zip file downloaded!'
+        )
       } else {
         // For server-side scanned files
         if (!folderPath) {
@@ -503,22 +560,25 @@ function App() {
         }
 
         // Prepare file data for backend
-        const filesForGeneration = fileData.map(file => ({
+        const filesForGeneration = fileData.map((file) => ({
           path: file.path,
           name: file.name,
-          vendorPartNumber: file.vendorPartNumber
+          vendorPartNumber: file.vendorPartNumber,
         }))
 
-        const response = await fetch('http://localhost:5000/api/generate-files-with-part-numbers', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            folderPath: folderPath,
-            files: filesForGeneration
-          }),
-        })
+        const response = await fetch(
+          'http://localhost:5000/api/generate-files-with-part-numbers',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              folderPath: folderPath,
+              files: filesForGeneration,
+            }),
+          }
+        )
 
         if (!response.ok) {
           const errorData = await response.json()
@@ -528,7 +588,7 @@ function App() {
         const data = await response.json()
         setSuccess(
           `Successfully generated ${data.filesCopied} file(s) with part numbers in "${data.outputFolder}". ` +
-          `Excel file created with ${data.uniquePartNumbers} unique part number(s).`
+            `Excel file created with ${data.uniquePartNumbers} unique part number(s).`
         )
       }
     } catch (err) {
@@ -549,7 +609,9 @@ function App() {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch('http://localhost:5000/api/all-processed-files')
+      const response = await fetch(
+        'http://localhost:5000/api/all-processed-files'
+      )
       if (!response.ok) {
         throw new Error('Failed to load processed files')
       }
@@ -572,7 +634,7 @@ function App() {
   }
 
   const filteredAndSortedFiles = React.useMemo(() => {
-    let filtered = processedFiles.filter(file => {
+    let filtered = processedFiles.filter((file) => {
       const query = searchQuery.toLowerCase()
       return (
         file.originalName.toLowerCase().includes(query) ||
@@ -585,12 +647,12 @@ function App() {
     filtered.sort((a, b) => {
       let aVal = a[sortField]
       let bVal = b[sortField]
-      
+
       if (typeof aVal === 'string') {
         aVal = aVal.toLowerCase()
         bVal = bVal.toLowerCase()
       }
-      
+
       if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1
       if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1
       return 0
@@ -599,52 +661,352 @@ function App() {
     return filtered
   }, [processedFiles, searchQuery, sortField, sortDirection])
 
+  const handleCsvUpload = async (event) => {
+    const file = event.target.files[0]
+    if (!file) return
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('csvFile', file)
+
+      const response = await fetch('http://localhost:5000/api/match-csv', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to process CSV')
+      }
+
+      const data = await response.json()
+      setCsvMatches(data)
+      setSuccess(
+        `Found ${data.matchedCount} matches out of ${data.totalCsvRows} CSV entries`
+      )
+    } catch (err) {
+      setError(err.message || 'Failed to process CSV file')
+    } finally {
+      setLoading(false)
+      // Reset input so same file can be selected again
+      event.target.value = ''
+    }
+  }
+
+  const handleGenerateExcelFromMatches = async () => {
+    if (!csvMatches || csvMatches.matches.length === 0) {
+      setError('No matches to generate Excel file')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const response = await fetch(
+        'http://localhost:5000/api/generate-excel-from-matches',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ matches: csvMatches.matches }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to generate Excel file')
+      }
+
+      // Download the Excel file
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'Matched_Part_Numbers.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+
+      setSuccess('Excel file generated and downloaded successfully!')
+    } catch (err) {
+      setError(err.message || 'Failed to generate Excel file')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (currentPage === 'processed') {
     return (
-      <div className="app">
-        <div className="container">
-          <header className="header">
+      <div className='app'>
+        <div className='container'>
+          <header className='header'>
             <h1>All Processed Files</h1>
-            <p className="subtitle">
+            <p className='subtitle'>
               View and search all files that have been assigned part numbers
             </p>
           </header>
 
-          <div className="card">
-            <div className="section">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <div className='card'>
+            <div className='section'>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '20px',
+                }}
+              >
                 <button
                   onClick={() => setCurrentPage('main')}
-                  className="btn btn-secondary"
+                  className='btn btn-secondary'
                   style={{ marginBottom: 0 }}
                 >
                   ← Back to Main
                 </button>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <div
+                  style={{ display: 'flex', gap: '10px', alignItems: 'center' }}
+                >
                   <input
-                    type="text"
-                    placeholder="Search files, part numbers..."
+                    type='text'
+                    placeholder='Search files, part numbers...'
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="input"
+                    className='input'
                     style={{ width: '300px', marginBottom: 0 }}
                   />
                   <span style={{ color: '#d1d5db', fontSize: '0.9rem' }}>
-                    {filteredAndSortedFiles.length} of {processedFiles.length} files
+                    {filteredAndSortedFiles.length} of {processedFiles.length}{' '}
+                    files
                   </span>
                 </div>
               </div>
 
+              {/* CSV Upload Section */}
+              <div
+                style={{
+                  marginBottom: '30px',
+                  padding: '20px',
+                  backgroundColor: '#f8fafc',
+                  borderRadius: '8px',
+                  border: '1px solid #e2e8f0',
+                }}
+              >
+                <h3 style={{ marginTop: 0, marginBottom: '15px' }}>
+                  📄 Match CSV File
+                </h3>
+                <p
+                  style={{
+                    fontSize: '0.9rem',
+                    color: '#64748b',
+                    marginBottom: '15px',
+                  }}
+                >
+                  Upload a CSV file to find matching processed files. The CSV
+                  can contain part numbers (12-digit or 9-digit) or filenames.
+                </p>
+                <div
+                  style={{ display: 'flex', gap: '10px', alignItems: 'center' }}
+                >
+                  <input
+                    type='file'
+                    ref={csvFileInputRef}
+                    onChange={handleCsvUpload}
+                    accept='.csv'
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    onClick={() => csvFileInputRef.current?.click()}
+                    disabled={loading}
+                    className='btn btn-primary'
+                    style={{ marginBottom: 0 }}
+                  >
+                    📤 Upload CSV
+                  </button>
+                  {csvMatches && (
+                    <button
+                      onClick={handleGenerateExcelFromMatches}
+                      disabled={loading || csvMatches.matches.length === 0}
+                      className='btn btn-secondary'
+                      style={{ marginBottom: 0 }}
+                    >
+                      📊 Generate Excel
+                    </button>
+                  )}
+                </div>
+
+                {/* Match Results */}
+                {csvMatches && (
+                  <div style={{ marginTop: '20px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        gap: '20px',
+                        marginBottom: '15px',
+                        flexWrap: 'wrap',
+                      }}
+                    >
+                      <div
+                        style={{
+                          padding: '10px 15px',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          borderRadius: '6px',
+                          fontWeight: '600',
+                        }}
+                      >
+                        ✓ Matched: {csvMatches.matchedCount}
+                      </div>
+                      <div
+                        style={{
+                          padding: '10px 15px',
+                          backgroundColor: '#ef4444',
+                          color: 'white',
+                          borderRadius: '6px',
+                          fontWeight: '600',
+                        }}
+                      >
+                        ✗ Unmatched: {csvMatches.unmatchedCount}
+                      </div>
+                      <div
+                        style={{
+                          padding: '10px 15px',
+                          backgroundColor: '#64748b',
+                          color: 'white',
+                          borderRadius: '6px',
+                          fontWeight: '600',
+                        }}
+                      >
+                        Total: {csvMatches.totalCsvRows}
+                      </div>
+                    </div>
+
+                    {csvMatches.matches.length > 0 && (
+                      <div
+                        style={{
+                          maxHeight: '400px',
+                          overflowY: 'auto',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <table
+                          className='data-table'
+                          style={{ marginBottom: 0 }}
+                        >
+                          <thead>
+                            <tr>
+                              <th>CSV Entry</th>
+                              <th>Match Type</th>
+                              <th>Part Number</th>
+                              <th>Original Filename</th>
+                              <th>Original Path</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {csvMatches.matches.map((match, index) => (
+                              <tr key={index}>
+                                <td>
+                                  {Object.values(match.csvRow).join(', ')}
+                                </td>
+                                <td>
+                                  <span
+                                    style={{
+                                      padding: '4px 8px',
+                                      borderRadius: '4px',
+                                      fontSize: '0.85rem',
+                                      backgroundColor:
+                                        match.matchType === 'fullPartNumber'
+                                          ? '#d1fae5'
+                                          : match.matchType === 'basePartNumber'
+                                          ? '#fef3c7'
+                                          : '#dbeafe',
+                                      color:
+                                        match.matchType === 'fullPartNumber'
+                                          ? '#065f46'
+                                          : match.matchType === 'basePartNumber'
+                                          ? '#92400e'
+                                          : '#1e40af',
+                                    }}
+                                  >
+                                    {match.matchType}
+                                  </span>
+                                </td>
+                                <td>
+                                  <code
+                                    style={{
+                                      fontFamily: 'Courier New',
+                                      fontWeight: 'bold',
+                                    }}
+                                  >
+                                    {match.matchedFile.fullPartNumber}
+                                  </code>
+                                </td>
+                                <td>{match.matchedFile.originalName}</td>
+                                <td
+                                  style={{
+                                    fontSize: '0.85rem',
+                                    color: '#9ca3af',
+                                  }}
+                                >
+                                  {match.matchedFile.originalPath}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {csvMatches.unmatched.length > 0 && (
+                      <div style={{ marginTop: '20px' }}>
+                        <h4 style={{ marginBottom: '10px', color: '#ef4444' }}>
+                          Unmatched Entries ({csvMatches.unmatched.length})
+                        </h4>
+                        <div
+                          style={{
+                            maxHeight: '200px',
+                            overflowY: 'auto',
+                            border: '1px solid #fee2e2',
+                            borderRadius: '6px',
+                            backgroundColor: '#fef2f2',
+                            padding: '10px',
+                          }}
+                        >
+                          {csvMatches.unmatched.map((row, index) => (
+                            <div
+                              key={index}
+                              style={{
+                                padding: '5px',
+                                fontSize: '0.9rem',
+                                color: '#991b1b',
+                              }}
+                            >
+                              {Object.values(row).join(', ')}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {loading && processedFiles.length === 0 ? (
-                <p className="info-text">Loading processed files...</p>
+                <p className='info-text'>Loading processed files...</p>
               ) : processedFiles.length === 0 ? (
-                <p className="info-text">No processed files found.</p>
+                <p className='info-text'>No processed files found.</p>
               ) : (
-                <div className="table-container">
-                  <table className="data-table">
+                <div className='table-container'>
+                  <table className='data-table'>
                     <thead>
                       <tr>
-                        <th 
+                        <th
                           onClick={() => handleSort('originalName')}
                           style={{ cursor: 'pointer', userSelect: 'none' }}
                         >
@@ -655,7 +1017,7 @@ function App() {
                             </span>
                           )}
                         </th>
-                        <th 
+                        <th
                           onClick={() => handleSort('basePartNumber')}
                           style={{ cursor: 'pointer', userSelect: 'none' }}
                         >
@@ -666,7 +1028,7 @@ function App() {
                             </span>
                           )}
                         </th>
-                        <th 
+                        <th
                           onClick={() => handleSort('revision')}
                           style={{ cursor: 'pointer', userSelect: 'none' }}
                         >
@@ -677,7 +1039,7 @@ function App() {
                             </span>
                           )}
                         </th>
-                        <th 
+                        <th
                           onClick={() => handleSort('fullPartNumber')}
                           style={{ cursor: 'pointer', userSelect: 'none' }}
                         >
@@ -688,7 +1050,7 @@ function App() {
                             </span>
                           )}
                         </th>
-                        <th 
+                        <th
                           onClick={() => handleSort('originalPath')}
                           style={{ cursor: 'pointer', userSelect: 'none' }}
                         >
@@ -704,21 +1066,28 @@ function App() {
                     <tbody>
                       {filteredAndSortedFiles.map((file, index) => (
                         <tr key={index}>
-                          <td className="file-name-cell">
+                          <td className='file-name-cell'>
                             <strong>{file.originalName}</strong>
                           </td>
-                          <td className="base-part-cell">
+                          <td className='base-part-cell'>
                             <code>{file.basePartNumber}</code>
                           </td>
-                          <td className="revision-cell">
-                            {file.revision}
-                          </td>
-                          <td className="full-part-cell">
-                            <code style={{ fontFamily: 'Courier New', fontSize: '1rem', fontWeight: 'bold' }}>
+                          <td className='revision-cell'>{file.revision}</td>
+                          <td className='full-part-cell'>
+                            <code
+                              style={{
+                                fontFamily: 'Courier New',
+                                fontSize: '1rem',
+                                fontWeight: 'bold',
+                              }}
+                            >
                               {file.fullPartNumber}
                             </code>
                           </td>
-                          <td className="path-cell" style={{ fontSize: '0.85rem', color: '#9ca3af' }}>
+                          <td
+                            className='path-cell'
+                            style={{ fontSize: '0.85rem', color: '#9ca3af' }}
+                          >
                             {file.originalPath}
                           </td>
                         </tr>
@@ -729,8 +1098,23 @@ function App() {
               )}
 
               {error && (
-                <div className="error-message" style={{ marginTop: '20px' }}>
+                <div className='error-message' style={{ marginTop: '20px' }}>
                   {error}
+                </div>
+              )}
+              {success && (
+                <div
+                  className='success-message'
+                  style={{
+                    marginTop: '20px',
+                    padding: '12px 16px',
+                    backgroundColor: '#d1fae5',
+                    color: '#065f46',
+                    borderRadius: '6px',
+                    border: '1px solid #10b981',
+                  }}
+                >
+                  {success}
                 </div>
               )}
             </div>
@@ -741,17 +1125,17 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <div className="container">
-        <header className="header">
+    <div className='app'>
+      <div className='container'>
+        <header className='header'>
           <h1>PMF Vendor Part Number Generator</h1>
-          <p className="subtitle">
+          <p className='subtitle'>
             Generate unique 12-digit part numbers for SOLIDWORKS files
           </p>
           <div style={{ marginTop: '15px' }}>
             <button
               onClick={() => setCurrentPage('processed')}
-              className="btn btn-secondary"
+              className='btn btn-secondary'
               style={{ fontSize: '0.9rem', padding: '8px 16px' }}
             >
               View All Processed Files →
@@ -759,48 +1143,74 @@ function App() {
           </div>
         </header>
 
-        <div className="card">
-          <div className="section">
+        <div className='card'>
+          <div className='section'>
             <h2>1. Select Folder</h2>
-            <div className="folder-select-group">
+            <div className='folder-select-group'>
               <button
                 onClick={handleFolderPicker}
                 disabled={loading}
-                className="btn btn-primary btn-folder-picker"
+                className='btn btn-primary btn-folder-picker'
               >
                 📁 Select Folder
               </button>
               <input
-                type="file"
+                type='file'
                 ref={fileInputRef}
                 onChange={handleFileInputChange}
-                webkitdirectory=""
-                directory=""
+                webkitdirectory=''
+                directory=''
                 multiple
                 style={{ display: 'none' }}
               />
               {folderPath && (
-                <div className="selected-folder">
-                  <span className="folder-icon">📂</span>
-                  <span className="folder-path">{folderPath}</span>
+                <div className='selected-folder'>
+                  <span className='folder-icon'>📂</span>
+                  <span className='folder-path'>{folderPath}</span>
                 </div>
               )}
             </div>
-            <div className="divider">
+            <div className='divider'>
               <span>OR</span>
             </div>
-            <div className="input-group">
+            <div
+              className='input-group'
+              style={{
+                display: 'flex',
+                gap: '10px',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+              }}
+            >
               <input
-                type="text"
-                placeholder="Enter folder path manually (e.g., C:\Projects\Parts)"
+                type='text'
+                placeholder='Enter folder path manually (e.g., C:\Projects\Parts)'
                 value={folderPath}
                 onChange={(e) => setFolderPath(e.target.value)}
-                className="input"
+                className='input'
+                style={{ flex: '1', minWidth: '200px' }}
               />
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <input
+                  type='checkbox'
+                  checked={includeSubdirectories}
+                  onChange={(e) => setIncludeSubdirectories(e.target.checked)}
+                  style={{ cursor: 'pointer' }}
+                />
+                <span>Include subdirectories</span>
+              </label>
               <button
                 onClick={handleFolderSelect}
                 disabled={loading}
-                className="btn btn-secondary"
+                className='btn btn-secondary'
               >
                 Scan Folder
               </button>
@@ -808,78 +1218,100 @@ function App() {
           </div>
 
           {files.length > 0 && (
-            <div className="section">
+            <div className='section'>
               <h2>2. Found Files ({files.length})</h2>
               {loading && fileData.length === 0 && (
-                <p className="info-text" style={{ marginBottom: '15px' }}>
+                <p className='info-text' style={{ marginBottom: '15px' }}>
                   ⏳ Processing files and checking for existing part numbers...
                 </p>
               )}
               {folderStatus && folderStatus.hasRenamedFiles && (
-                <div className="folder-status-banner renamed">
-                  <span className="status-icon">⚠️</span>
-                  <div className="status-content">
-                    <strong>This folder contains renamed files (part numbers as filenames)</strong>
-                    <div className="status-details">
-                      Some files have been renamed with part numbers. Original filenames will be shown below.
+                <div className='folder-status-banner renamed'>
+                  <span className='status-icon'>⚠️</span>
+                  <div className='status-content'>
+                    <strong>
+                      This folder contains renamed files (part numbers as
+                      filenames)
+                    </strong>
+                    <div className='status-details'>
+                      Some files have been renamed with part numbers. Original
+                      filenames will be shown below.
                     </div>
                   </div>
                 </div>
               )}
-              {folderStatus && folderStatus.hasBeenProcessed && !folderStatus.hasRenamedFiles && (
-                <div className="folder-status-banner processed">
-                  <span className="status-icon">✓</span>
-                  <div className="status-content">
-                    <strong>This folder has been processed before</strong>
-                    <div className="status-details">
-                      {folderStatus.processedFiles} of {folderStatus.totalFiles} files already have part numbers
-                      {folderStatus.newFiles > 0 && ` • ${folderStatus.newFiles} new file(s) need part numbers`}
+              {folderStatus &&
+                folderStatus.hasBeenProcessed &&
+                !folderStatus.hasRenamedFiles && (
+                  <div className='folder-status-banner processed'>
+                    <span className='status-icon'>✓</span>
+                    <div className='status-content'>
+                      <strong>This folder has been processed before</strong>
+                      <div className='status-details'>
+                        {folderStatus.processedFiles} of{' '}
+                        {folderStatus.totalFiles} files already have part
+                        numbers
+                        {folderStatus.newFiles > 0 &&
+                          ` • ${folderStatus.newFiles} new file(s) need part numbers`}
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
               {folderStatus && !folderStatus.hasBeenProcessed && (
-                <div className="folder-status-banner new">
-                  <span className="status-icon">📁</span>
-                  <div className="status-content">
+                <div className='folder-status-banner new'>
+                  <span className='status-icon'>📁</span>
+                  <div className='status-content'>
                     <strong>New folder - no part numbers generated yet</strong>
-                    <div className="status-details">
-                      All {folderStatus.totalFiles} files are new and will get part numbers
+                    <div className='status-details'>
+                      All {folderStatus.totalFiles} files are new and will get
+                      part numbers
                     </div>
                   </div>
                 </div>
               )}
-              <div className="file-list">
+              <div className='file-list'>
                 {files.map((file, index) => (
-                  <div 
-                    key={index} 
-                    className={`file-item ${file.hasMapping ? 'has-mapping' : 'new-file'}`}
+                  <div
+                    key={index}
+                    className={`file-item ${
+                      file.hasMapping ? 'has-mapping' : 'new-file'
+                    }`}
                   >
-                    <div className="file-info">
-                      <span className="file-name">
+                    <div className='file-info'>
+                      <span className='file-name'>
                         {file.name}
                         {file.hasMapping && (
-                          <span className="mapping-badge" title="Has existing part number">
+                          <span
+                            className='mapping-badge'
+                            title='Has existing part number'
+                          >
                             ✓ Processed
                           </span>
                         )}
                         {!file.hasMapping && (
-                          <span className="new-badge" title="New file - needs part number">
+                          <span
+                            className='new-badge'
+                            title='New file - needs part number'
+                          >
                             New
                           </span>
                         )}
                       </span>
-                      <span className="file-path">{file.relativePath}</span>
-                      {file.isRenamedFile && file.originalFilenames && file.originalFilenames.length > 0 && (
-                        <span className="original-filename">
-                          Original: {file.originalFilenames.join(', ')}
-                        </span>
-                      )}
-                      {file.hasMapping && file.existingPartNumber && !file.isRenamedFile && (
-                        <span className="existing-part-number">
-                          Existing Part #: {file.existingPartNumber}
-                        </span>
-                      )}
+                      <span className='file-path'>{file.relativePath}</span>
+                      {file.isRenamedFile &&
+                        file.originalFilenames &&
+                        file.originalFilenames.length > 0 && (
+                          <span className='original-filename'>
+                            Original: {file.originalFilenames.join(', ')}
+                          </span>
+                        )}
+                      {file.hasMapping &&
+                        file.existingPartNumber &&
+                        !file.isRenamedFile && (
+                          <span className='existing-part-number'>
+                            Existing Part #: {file.existingPartNumber}
+                          </span>
+                        )}
                     </div>
                   </div>
                 ))}
@@ -888,7 +1320,7 @@ function App() {
                 <button
                   onClick={handleProcessFiles}
                   disabled={loading}
-                  className="btn btn-secondary"
+                  className='btn btn-secondary'
                 >
                   Process Files & Generate Part Numbers
                 </button>
@@ -897,7 +1329,7 @@ function App() {
                 <button
                   onClick={handleProcessFiles}
                   disabled={loading}
-                  className="btn btn-secondary"
+                  className='btn btn-secondary'
                 >
                   Re-process Files
                 </button>
@@ -906,13 +1338,14 @@ function App() {
           )}
 
           {fileData.length > 0 && (
-            <div className="section">
+            <div className='section'>
               <h2>3. Vendor Part Numbers</h2>
-              <p className="info-text">
-                Part numbers are 12 digits: 9 digits for base part + 3 digits for revision (001, 002, etc.)
+              <p className='info-text'>
+                Part numbers are 12 digits: 9 digits for base part + 3 digits
+                for revision (001, 002, etc.)
               </p>
-              <div className="table-container">
-                <table className="data-table">
+              <div className='table-container'>
+                <table className='data-table'>
                   <thead>
                     <tr>
                       <th>File Name</th>
@@ -936,189 +1369,257 @@ function App() {
                         return a.name.localeCompare(b.name)
                       })
                       .map((file, index) => {
-                      const basePart = file.basePartNumber || (file.vendorPartNumber ? file.vendorPartNumber.substring(0, 9) : '')
-                      const revision = file.revision || (file.vendorPartNumber ? parseInt(file.vendorPartNumber.substring(9)) : 1)
-                      const fullPart = file.vendorPartNumber || `${basePart}${revision.toString().padStart(3, '0')}`
-                      const hasMapping = file.hasMapping || false
-                      
-                      return (
-                        <tr key={index} className={hasMapping ? 'row-has-mapping' : 'row-new'}>
-                          <td className="file-name-cell">
-                            <div className="file-name-with-status">
-                              <div>
-                                {file.name}
-                                {file.isRenamedFile && (
-                                  <span className="table-badge renamed-badge" title="This file has been renamed with a part number">
-                                    Renamed
-                                  </span>
-                                )}
-                                {hasMapping && !file.isRenamedFile && (
-                                  <span className="table-badge processed-badge" title="This file was processed before">
-                                    ✓
-                                  </span>
-                                )}
-                                {!hasMapping && !file.isRenamedFile && (
-                                  <span className="table-badge new-badge-table" title="New file">
-                                    New
-                                  </span>
-                                )}
-                              </div>
-                              {file.isRenamedFile && file.originalFilenames && file.originalFilenames.length > 0 && (
-                                <div className="original-filename-display">
-                                  <span className="original-label">Original:</span> {file.originalFilenames.join(', ')}
+                        const basePart =
+                          file.basePartNumber ||
+                          (file.vendorPartNumber
+                            ? file.vendorPartNumber.substring(0, 9)
+                            : '')
+                        const revision =
+                          file.revision ||
+                          (file.vendorPartNumber
+                            ? parseInt(file.vendorPartNumber.substring(9))
+                            : 1)
+                        const fullPart =
+                          file.vendorPartNumber ||
+                          `${basePart}${revision.toString().padStart(3, '0')}`
+                        const hasMapping = file.hasMapping || false
+
+                        return (
+                          <tr
+                            key={index}
+                            className={
+                              hasMapping ? 'row-has-mapping' : 'row-new'
+                            }
+                          >
+                            <td className='file-name-cell'>
+                              <div className='file-name-with-status'>
+                                <div>
+                                  {file.name}
+                                  {file.isRenamedFile && (
+                                    <span
+                                      className='table-badge renamed-badge'
+                                      title='This file has been renamed with a part number'
+                                    >
+                                      Renamed
+                                    </span>
+                                  )}
+                                  {hasMapping && !file.isRenamedFile && (
+                                    <span
+                                      className='table-badge processed-badge'
+                                      title='This file was processed before'
+                                    >
+                                      ✓
+                                    </span>
+                                  )}
+                                  {!hasMapping && !file.isRenamedFile && (
+                                    <span
+                                      className='table-badge new-badge-table'
+                                      title='New file'
+                                    >
+                                      New
+                                    </span>
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          </td>
-                          <td className="base-part-cell">
-                            <input
-                              type="text"
-                              value={basePart}
-                              onChange={(e) => {
-                                const newData = [...fileData]
-                                const newBase = e.target.value.replace(/\D/g, '').substring(0, 9)
-                                newData[index].basePartNumber = newBase
-                                newData[index].vendorPartNumber = `${newBase}${revision.toString().padStart(3, '0')}`
-                                setFileData(newData)
-                              }}
-                              className="part-number-input base-input"
-                              maxLength={9}
-                              placeholder="123456789"
-                            />
-                          </td>
-                          <td className="revision-cell">
-                            <div className="revision-controls">
+                                {file.isRenamedFile &&
+                                  file.originalFilenames &&
+                                  file.originalFilenames.length > 0 && (
+                                    <div className='original-filename-display'>
+                                      <span className='original-label'>
+                                        Original:
+                                      </span>{' '}
+                                      {file.originalFilenames.join(', ')}
+                                    </div>
+                                  )}
+                              </div>
+                            </td>
+                            <td className='base-part-cell'>
                               <input
-                                type="number"
-                                value={revision}
+                                type='text'
+                                value={basePart}
                                 onChange={(e) => {
                                   const newData = [...fileData]
-                                  const newRev = Math.max(1, Math.min(999, parseInt(e.target.value) || 1))
-                                  newData[index].revision = newRev
-                                  newData[index].vendorPartNumber = `${basePart}${newRev.toString().padStart(3, '0')}`
+                                  const newBase = e.target.value
+                                    .replace(/\D/g, '')
+                                    .substring(0, 9)
+                                  newData[index].basePartNumber = newBase
+                                  newData[
+                                    index
+                                  ].vendorPartNumber = `${newBase}${revision
+                                    .toString()
+                                    .padStart(3, '0')}`
                                   setFileData(newData)
                                 }}
-                                className="revision-input"
-                                min="1"
-                                max="999"
+                                className='part-number-input base-input'
+                                maxLength={9}
+                                placeholder='123456789'
                               />
+                            </td>
+                            <td className='revision-cell'>
+                              <div className='revision-controls'>
+                                <input
+                                  type='number'
+                                  value={revision}
+                                  onChange={(e) => {
+                                    const newData = [...fileData]
+                                    const newRev = Math.max(
+                                      1,
+                                      Math.min(
+                                        999,
+                                        parseInt(e.target.value) || 1
+                                      )
+                                    )
+                                    newData[index].revision = newRev
+                                    newData[
+                                      index
+                                    ].vendorPartNumber = `${basePart}${newRev
+                                      .toString()
+                                      .padStart(3, '0')}`
+                                    setFileData(newData)
+                                  }}
+                                  className='revision-input'
+                                  min='1'
+                                  max='999'
+                                />
+                                <button
+                                  onClick={async () => {
+                                    const newData = [...fileData]
+                                    const newRev = revision + 1
+                                    try {
+                                      const response = await fetch(
+                                        'http://localhost:5000/api/create-revision',
+                                        {
+                                          method: 'POST',
+                                          headers: {
+                                            'Content-Type': 'application/json',
+                                          },
+                                          body: JSON.stringify({
+                                            filePath: file.path,
+                                            revision: newRev,
+                                          }),
+                                        }
+                                      )
+
+                                      if (response.ok) {
+                                        const data = await response.json()
+                                        newData[index].revision = data.revision
+                                        newData[index].vendorPartNumber =
+                                          data.vendorPartNumber
+                                        newData[index].basePartNumber =
+                                          data.basePartNumber
+                                        setFileData(newData)
+                                        setSuccess(
+                                          `Created revision ${data.revision} for ${file.name}`
+                                        )
+                                      }
+                                    } catch (err) {
+                                      // Fallback: just update locally
+                                      newData[index].revision = newRev
+                                      newData[
+                                        index
+                                      ].vendorPartNumber = `${basePart}${newRev
+                                        .toString()
+                                        .padStart(3, '0')}`
+                                      setFileData(newData)
+                                    }
+                                  }}
+                                  className='btn btn-small btn-revision'
+                                  title='Create next revision'
+                                >
+                                  +1
+                                </button>
+                              </div>
+                            </td>
+                            <td className='full-part-cell'>
+                              <input
+                                type='text'
+                                value={fullPart}
+                                readOnly
+                                className='part-number-input full-input'
+                                maxLength={12}
+                              />
+                            </td>
+                            <td className='actions-cell'>
                               <button
                                 onClick={async () => {
-                                  const newData = [...fileData]
-                                  const newRev = revision + 1
                                   try {
-                                    const response = await fetch('http://localhost:5000/api/create-revision', {
-                                      method: 'POST',
-                                      headers: {
-                                        'Content-Type': 'application/json',
-                                      },
-                                      body: JSON.stringify({
-                                        filePath: file.path,
-                                        revision: newRev
-                                      }),
-                                    })
-                                    
+                                    const response = await fetch(
+                                      'http://localhost:5000/api/create-revision',
+                                      {
+                                        method: 'POST',
+                                        headers: {
+                                          'Content-Type': 'application/json',
+                                        },
+                                        body: JSON.stringify({
+                                          filePath: file.path,
+                                        }),
+                                      }
+                                    )
+
                                     if (response.ok) {
                                       const data = await response.json()
+                                      const newData = [...fileData]
                                       newData[index].revision = data.revision
-                                      newData[index].vendorPartNumber = data.vendorPartNumber
-                                      newData[index].basePartNumber = data.basePartNumber
+                                      newData[index].vendorPartNumber =
+                                        data.vendorPartNumber
+                                      newData[index].basePartNumber =
+                                        data.basePartNumber
                                       setFileData(newData)
-                                      setSuccess(`Created revision ${data.revision} for ${file.name}`)
+                                      setSuccess(
+                                        `Created revision ${data.revision} for ${file.name}`
+                                      )
                                     }
                                   } catch (err) {
-                                    // Fallback: just update locally
-                                    newData[index].revision = newRev
-                                    newData[index].vendorPartNumber = `${basePart}${newRev.toString().padStart(3, '0')}`
-                                    setFileData(newData)
+                                    setError('Failed to create revision')
                                   }
                                 }}
-                                className="btn btn-small btn-revision"
-                                title="Create next revision"
+                                className='btn btn-small btn-new-revision'
+                                title='Create new revision'
                               >
-                                +1
+                                New Rev
                               </button>
-                            </div>
-                          </td>
-                          <td className="full-part-cell">
-                            <input
-                              type="text"
-                              value={fullPart}
-                              readOnly
-                              className="part-number-input full-input"
-                              maxLength={12}
-                            />
-                          </td>
-                          <td className="actions-cell">
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const response = await fetch('http://localhost:5000/api/create-revision', {
-                                    method: 'POST',
-                                    headers: {
-                                      'Content-Type': 'application/json',
-                                    },
-                                    body: JSON.stringify({
-                                      filePath: file.path
-                                    }),
-                                  })
-                                  
-                                  if (response.ok) {
-                                    const data = await response.json()
-                                    const newData = [...fileData]
-                                    newData[index].revision = data.revision
-                                    newData[index].vendorPartNumber = data.vendorPartNumber
-                                    newData[index].basePartNumber = data.basePartNumber
-                                    setFileData(newData)
-                                    setSuccess(`Created revision ${data.revision} for ${file.name}`)
-                                  }
-                                } catch (err) {
-                                  setError('Failed to create revision')
-                                }
-                              }}
-                              className="btn btn-small btn-new-revision"
-                              title="Create new revision"
-                            >
-                              New Rev
-                            </button>
-                          </td>
-                          <td className="properties-cell">
-                            {Object.keys(file.properties || {}).length > 0 ? (
-                              <div className="properties-list">
-                                {Object.entries(file.properties).map(([key, value]) => (
-                                  <div key={key} className="property-item">
-                                    <strong>{key}:</strong> {value.resolved || value.value}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="no-properties">No properties found</span>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
+                            </td>
+                            <td className='properties-cell'>
+                              {Object.keys(file.properties || {}).length > 0 ? (
+                                <div className='properties-list'>
+                                  {Object.entries(file.properties).map(
+                                    ([key, value]) => (
+                                      <div key={key} className='property-item'>
+                                        <strong>{key}:</strong>{' '}
+                                        {value.resolved || value.value}
+                                      </div>
+                                    )
+                                  )}
+                                </div>
+                              ) : (
+                                <span className='no-properties'>
+                                  No properties found
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                   </tbody>
                 </table>
               </div>
-              <div className="button-group">
+              <div className='button-group'>
                 <button
                   onClick={handleUpdateProperties}
                   disabled={loading}
-                  className="btn btn-success"
+                  className='btn btn-success'
                 >
                   Update Files with Vendor Part Numbers
                 </button>
                 <button
                   onClick={handleExportMappings}
-                  className="btn btn-outline"
+                  className='btn btn-outline'
                 >
                   Export Mappings (CSV)
                 </button>
                 <button
                   onClick={handleGenerateFilesWithPartNumbers}
                   disabled={loading}
-                  className="btn btn-outline"
+                  className='btn btn-outline'
                 >
                   Generate Files with Part Numbers
                 </button>
@@ -1126,21 +1627,13 @@ function App() {
             </div>
           )}
 
-          {error && (
-            <div className="alert alert-error">
-              {error}
-            </div>
-          )}
+          {error && <div className='alert alert-error'>{error}</div>}
 
-          {success && (
-            <div className="alert alert-success">
-              {success}
-            </div>
-          )}
+          {success && <div className='alert alert-success'>{success}</div>}
 
           {loading && (
-            <div className="loading">
-              <div className="spinner"></div>
+            <div className='loading'>
+              <div className='spinner'></div>
               <p>Processing...</p>
             </div>
           )}
@@ -1151,4 +1644,3 @@ function App() {
 }
 
 export default App
-
